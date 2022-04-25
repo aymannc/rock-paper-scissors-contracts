@@ -1,19 +1,30 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
 
-describe("Greeter", function () {
-  it("Should return the new greeting once it's changed", async function () {
-    const Greeter = await ethers.getContractFactory("Greeter");
-    const greeter = await Greeter.deploy("Hello, world!");
-    await greeter.deployed();
+describe("RockPaperScissors", function () {
 
-    expect(await greeter.greet()).to.equal("Hello, world!");
+  const options = ["Rock", "Paper", "Scissors"]
 
-    const setGreetingTx = await greeter.setGreeting("Hola, mundo!");
+  it("Should return the game options", async function () {
+    const RockPaperScissors = await ethers.getContractFactory("RockPaperScissors");
+    const game = await RockPaperScissors.deploy(options);
+    await game.deployed();
+
+    console.log(await game.getOptions().length)
+    expect(await game.getOptions()).to.contain(options[0]);
+  });
+
+  it("should set the options", async () => {
+
+    const RockPaperScissors = await ethers.getContractFactory("RockPaperScissors");
+    const game = await RockPaperScissors.deploy(options);
+    await game.deployed();
+
+    const setOptionsTx = await game.setOptions(options.slice(0, 1));
 
     // wait until the transaction is mined
-    await setGreetingTx.wait();
+    await setOptionsTx.wait();
 
-    expect(await greeter.greet()).to.equal("Hola, mundo!");
-  });
+    expect(await game.getOptions()).to.contain(options[0]);
+  })
 });
