@@ -4,7 +4,18 @@ pragma solidity ^0.8.0;
 import "hardhat/console.sol";
 
 contract RockPaperScissors {
-    string[] options;
+    struct Game {
+        address firstPlayer;
+        string firstPlayerChoice;
+        address secoundPlayer;
+        string secoundPlayerChoice;
+        address winner;
+        bool isFinished;
+    }
+
+    mapping(address => Game) public games;
+
+    string[] public options;
 
     address owner;
 
@@ -36,5 +47,17 @@ contract RockPaperScissors {
 
     function setOptions(string[] memory _options) external onlyOwner {
         options = _options;
+    }
+
+    function initGame(string calldata choice) external returns (address) {
+        Game memory game;
+        game.firstPlayer = msg.sender;
+        game.firstPlayerChoice = choice;
+        game.isFinished = false;
+
+        games[msg.sender] = game;
+        console.log(msg.sender);
+
+        return msg.sender;
     }
 }
