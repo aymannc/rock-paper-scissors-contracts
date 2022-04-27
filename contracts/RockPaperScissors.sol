@@ -9,9 +9,10 @@ contract RockPaperScissors {
         string firstPlayerChoice;
         address secoundPlayer;
         string secoundPlayerChoice;
+        bool isDraw;
         address winner;
-        bool isFinished;
         bool exists;
+        bool isFinished;
     }
 
     mapping(address => Game) public games;
@@ -38,14 +39,9 @@ contract RockPaperScissors {
         _;
     }
 
-    modifier gameFinished(address gameId) {
-        require(games[gameId].isFinished == false, "This game has finished !");
-        _;
-    }
-
-    constructor(string[] memory _options) {
+    constructor() {
         owner = msg.sender;
-        options = _options;
+        options = ["R", "P", "S"];
     }
 
     /**
@@ -65,7 +61,7 @@ contract RockPaperScissors {
         options = _options;
     }
 
-    function initGame(uint256 choiceId)
+    function createGame(uint256 choiceId)
         external
         validChoice(choiceId)
         returns (address)
@@ -85,9 +81,9 @@ contract RockPaperScissors {
         external
         validChoice(choiceId)
         gameExists(gameId)
-        gameFinished(gameId)
         returns (Game memory)
     {
+        require(games[gameId].isFinished == false, "This game has finished !");
         require(
             msg.sender != games[gameId].firstPlayer,
             "You've already played your role !"
@@ -98,5 +94,67 @@ contract RockPaperScissors {
         games[gameId].isFinished = true;
 
         return games[gameId];
+    }
+
+    function findWinner(address gameId)
+        external
+        gameExists(gameId)
+        returns (address)
+    {
+        // R , P , S
+
+        require(
+            games[gameId].isFinished == true,
+            "The second player hasn't played yet !"
+        );
+
+        if (
+            compareStringsbyBytes(
+                games[gameId].firstPlayerChoice,
+                games[gameId].secoundPlayerChoice
+            )
+        ) games[gameId].isDraw = true;
+        else if (
+            compareStringsbyBytes(games[gameId].firstPlayerChoice, options[0])
+        ) {
+            if (
+                compareStringsbyBytes(
+                    games[gameId].secoundPlayerChoice,
+                    options[1]
+                )
+            ) games[gameId].winner = games[gameId].secoundPlayer;
+            else games[gameId].winner = games[gameId].firstPlayer;
+        } else if (
+            compareStringsbyBytes(games[gameId].firstPlayerChoice, options[1])
+        ) {
+            if (
+                compareStringsbyBytes(
+                    games[gameId].secoundPlayerChoice,
+                    options[2]
+                )
+            ) games[gameId].winner = games[gameId].secoundPlayer;
+            else games[gameId].winner = games[gameId].firstPlayer;
+        } else if (
+            compareStringsbyBytes(games[gameId].firstPlayerChoice, options[2])
+        ) {
+            if (
+                compareStringsbyBytes(
+                    games[gameId].secoundPlayerChoice,
+                    options[0]
+                )
+            ) games[gameId].winner = games[gameId].secoundPlayer;
+            else games[gameId].winner = games[gameId].firstPlayer;
+        }
+
+        return games[gameId].winner;
+    }
+
+    function compareStringsbyBytes(string memory s1, string memory s2)
+        private
+        pure
+        returns (bool)
+    {
+        return
+            keccak256(abi.encodePacked(s1)) == keccak256(abi.encodePacked(s2));
     }
 }
