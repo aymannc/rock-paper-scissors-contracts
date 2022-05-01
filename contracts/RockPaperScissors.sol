@@ -6,18 +6,22 @@ import "hardhat/console.sol";
 contract RockPaperScissors {
     struct Game {
         address firstPlayer;
-        string firstPlayerChoice;
-        address secoundPlayer;
-        string secoundPlayerChoice;
-        bool isDraw;
+        address secondPlayer;
         address winner;
-        bool exists;
+        string firstPlayerChoice;
+        string secondPlayerChoice;
+        bytes32 firstPlayerChoiceHash;
+        bytes32 secondPlayerChoiceHash;
+        uint256 timestamp;
+        uint256 firstPlayerNonce;
+        uint256 secondPlayerNonce;
         bool isFinished;
+        bool isDraw;
     }
 
     mapping(address => Game) public games;
 
-    string[] public options;
+    string[] public choices = ["R", "P", "S"];
 
     address owner;
 
@@ -30,22 +34,21 @@ contract RockPaperScissors {
     }
 
     modifier validChoice(uint256 choiceId) {
-        require(choiceId < options.length, "Invalid choice Id !");
+        require(choiceId < choices.length, "Invalid choice Id !");
         _;
     }
 
-    modifier gameExists(address gameId) {
-        require(games[gameId].exists, "Invalid gameId !");
+    modifier gameExists(address _gameId) {
+        require(games[_gameId].timestamp > 0, "Invalid _gameId !");
         _;
     }
 
     constructor() {
         owner = msg.sender;
-        options = ["R", "P", "S"];
     }
 
     /**
-     * Read only function to retrieve the options of the game.
+     * Read only function to retrieve the choices of the game.
      *
      * The `view` modifier indicates that it doesn't modify the contract's
      * state, which allows us to call it without executing a transaction.
@@ -53,100 +56,169 @@ contract RockPaperScissors {
      * The `external` modifier makes a function *only* callable from outside
      * the contract.
      */
-    function getOptions() external view returns (string[] memory) {
-        return options;
+    function getchoices() external view returns (string[] memory) {
+        return choices;
     }
 
-    function setOptions(string[] memory _options) external onlyOwner {
-        options = _options;
+    function setchoices(string[] memory _choices) external onlyOwner {
+        choices = _choices;
     }
 
-    function createGame(uint256 choiceId)
+    function createGame(uint256 _choiceId, uint256 _nonce)
         external
-        validChoice(choiceId)
+        validChoice(_choiceId)
         returns (address)
     {
         Game memory game;
         game.firstPlayer = msg.sender;
-        game.firstPlayerChoice = options[choiceId];
-        game.exists = true;
+        game.firstPlayerChoiceHash = keccak256(
+            abi.encodePacked(choices[_choiceId], _nonce)
+        );
+        game.timestamp = block.timestamp;
 
         games[msg.sender] = game;
+
         console.log(msg.sender);
 
         return msg.sender;
     }
 
-    function play(address gameId, uint256 choiceId)
-        external
-        validChoice(choiceId)
-        gameExists(gameId)
-        returns (Game memory)
-    {
-        require(games[gameId].isFinished == false, "This game has finished !");
+    function submit(
+        address _gameId,
+        uint256 _choiceId,
+        uint256 _nonce
+    ) external validChoice(_choiceId) gameExists(_gameId) {
+        require(games[_gameId].isFinished == false, "This game has finished !");
         require(
-            msg.sender != games[gameId].firstPlayer,
+            msg.sender != games[_gameId].firstPlayer,
             "You've already played your role !"
         );
 
-        games[gameId].secoundPlayer = msg.sender;
-        games[gameId].secoundPlayerChoice = options[choiceId];
-        games[gameId].isFinished = true;
-
-        return games[gameId];
+        games[_gameId].secondPlayer = msg.sender;
+        games[_gameId].secondPlayerChoiceHash = keccak256(
+            abi.encodePacked(choices[_choiceId], _nonce)
+        );
     }
 
-    function findWinner(address gameId)
-        external
-        gameExists(gameId)
+    function reveal(
+        address _gameId,
+        uint256 _choiceId,
+        uint256 _nonce
+    ) external validChoice(_choiceId) gameExists(_gameId) {
+        require(games[_gameId].isFinished == false, "This game has finished !");
+
+        require(
+            games[_gameId].firstPlayer == msg.sender ||
+                games[_gameId].secondPlayer == msg.sender,
+            "You don't have access into this game !"
+        );
+
+        require(
+            games[_gameId].secondPlayerChoiceHash != 0,
+            "Can't reveal choices yet, all players need to submit choices !"
+        );
+
+        require(
+            (games[_gameId].firstPlayer == msg.sender &&
+                bytes(games[_gameId].firstPlayerChoice).length == 0) ||
+                (games[_gameId].secondPlayer == msg.sender &&
+                    bytes(games[_gameId].secondPlayerChoice).length == 0),
+            "You've already revealed your choice !"
+        );
+
+        if (games[_gameId].firstPlayer == msg.sender) {
+            if (
+                keccak256(abi.encodePacked(choices[_choiceId], _nonce)) ==
+                games[_gameId].firstPlayerChoiceHash
+            ) {
+                games[_gameId].firstPlayerChoice = choices[_choiceId];
+                games[_gameId].firstPlayerNonce = _nonce;
+            } else
+                revert(
+                    "Invalid data, Please provide the right (choice,nonce) combination to reveal your choice !"
+                );
+        } else {
+            if (
+                keccak256(abi.encodePacked(choices[_choiceId], _nonce)) ==
+                games[_gameId].secondPlayerChoiceHash
+            ) {
+                games[_gameId].secondPlayerChoice = choices[_choiceId];
+                games[_gameId].secondPlayerNonce = _nonce;
+            } else
+                revert(
+                    "Invalid data, Please provide the right (choice,nonce) combination to reveal your choice !"
+                );
+        }
+
+        if (
+            bytes(games[_gameId].firstPlayerChoice).length != 0 &&
+            bytes(games[_gameId].secondPlayerChoice).length != 0
+        ) {
+            games[_gameId].isFinished = true;
+            findWinner(_gameId);
+        }
+    }
+
+    function findWinner(address _gameId)
+        public
+        gameExists(_gameId)
         returns (address)
     {
         // R , P , S
-
         require(
-            games[gameId].isFinished == true,
-            "The second player hasn't played yet !"
+            games[_gameId].isFinished == true,
+            "The game hasn't finished yet !"
         );
 
-        if (
-            compareStringsbyBytes(
-                games[gameId].firstPlayerChoice,
-                games[gameId].secoundPlayerChoice
-            )
-        ) games[gameId].isDraw = true;
-        else if (
-            compareStringsbyBytes(games[gameId].firstPlayerChoice, options[0])
-        ) {
+        if (games[_gameId].winner == address(0)) {
             if (
                 compareStringsbyBytes(
-                    games[gameId].secoundPlayerChoice,
-                    options[1]
+                    games[_gameId].firstPlayerChoice,
+                    games[_gameId].secondPlayerChoice
                 )
-            ) games[gameId].winner = games[gameId].secoundPlayer;
-            else games[gameId].winner = games[gameId].firstPlayer;
-        } else if (
-            compareStringsbyBytes(games[gameId].firstPlayerChoice, options[1])
-        ) {
-            if (
+            ) games[_gameId].isDraw = true;
+            else if (
                 compareStringsbyBytes(
-                    games[gameId].secoundPlayerChoice,
-                    options[2]
+                    games[_gameId].firstPlayerChoice,
+                    choices[0]
                 )
-            ) games[gameId].winner = games[gameId].secoundPlayer;
-            else games[gameId].winner = games[gameId].firstPlayer;
-        } else if (
-            compareStringsbyBytes(games[gameId].firstPlayerChoice, options[2])
-        ) {
-            if (
+            ) {
+                if (
+                    compareStringsbyBytes(
+                        games[_gameId].secondPlayerChoice,
+                        choices[1]
+                    )
+                ) games[_gameId].winner = games[_gameId].secondPlayer;
+                else games[_gameId].winner = games[_gameId].firstPlayer;
+            } else if (
                 compareStringsbyBytes(
-                    games[gameId].secoundPlayerChoice,
-                    options[0]
+                    games[_gameId].firstPlayerChoice,
+                    choices[1]
                 )
-            ) games[gameId].winner = games[gameId].secoundPlayer;
-            else games[gameId].winner = games[gameId].firstPlayer;
+            ) {
+                if (
+                    compareStringsbyBytes(
+                        games[_gameId].secondPlayerChoice,
+                        choices[2]
+                    )
+                ) games[_gameId].winner = games[_gameId].secondPlayer;
+                else games[_gameId].winner = games[_gameId].firstPlayer;
+            } else if (
+                compareStringsbyBytes(
+                    games[_gameId].firstPlayerChoice,
+                    choices[2]
+                )
+            ) {
+                if (
+                    compareStringsbyBytes(
+                        games[_gameId].secondPlayerChoice,
+                        choices[0]
+                    )
+                ) games[_gameId].winner = games[_gameId].secondPlayer;
+                else games[_gameId].winner = games[_gameId].firstPlayer;
+            }
         }
-
-        return games[gameId].winner;
+        return games[_gameId].winner;
     }
 
     function compareStringsbyBytes(string memory s1, string memory s2)
