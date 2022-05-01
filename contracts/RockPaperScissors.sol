@@ -69,6 +69,11 @@ contract RockPaperScissors {
         validChoice(_choiceId)
         returns (address)
     {
+        require(
+            games[msg.sender].timestamp == 0 || games[msg.sender].isFinished,
+            "You can't create a new game until the old one finishes !"
+        );
+
         Game memory game;
         game.firstPlayer = msg.sender;
         game.firstPlayerChoiceHash = keccak256(
