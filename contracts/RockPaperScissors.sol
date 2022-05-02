@@ -4,9 +4,16 @@ pragma solidity ^0.8.0;
 import "hardhat/console.sol";
 
 contract RockPaperScissors {
+    enum Choice {
+        UNDEFINED,
+        ROCK,
+        PAPER,
+        SCISSORS
+    }
+
     struct Player {
         address playerAddress;
-        string choice;
+        Choice choice;
         bytes32 hashedChoice;
         uint256 nonce;
     }
@@ -22,8 +29,6 @@ contract RockPaperScissors {
 
     mapping(address => Game) public games;
 
-    string[] public choices = ["R", "P", "S"];
-
     address owner;
 
     modifier onlyOwner() {
@@ -34,8 +39,11 @@ contract RockPaperScissors {
         _;
     }
 
-    modifier validChoice(uint256 choiceId) {
-        require(choiceId < choices.length, "Invalid choice Id !");
+    modifier validChoice(Choice _choice) {
+        require(
+            _choice >= Choice.ROCK && _choice <= Choice.SCISSORS,
+            "Invalid choice !"
+        );
         _;
     }
 
@@ -48,26 +56,9 @@ contract RockPaperScissors {
         owner = msg.sender;
     }
 
-    /**
-     * Read only function to retrieve the choices of the game.
-     *
-     * The `view` modifier indicates that it doesn't modify the contract's
-     * state, which allows us to call it without executing a transaction.
-     *
-     * The `external` modifier makes a function *only* callable from outside
-     * the contract.
-     */
-    function getchoices() external view returns (string[] memory) {
-        return choices;
-    }
-
-    function setchoices(string[] memory _choices) external onlyOwner {
-        choices = _choices;
-    }
-
-    function createGame(uint256 _choiceId, uint256 _nonce)
+    function createGame(Choice _choice, uint256 _nonce)
         external
-        validChoice(_choiceId)
+        validChoice(_choice)
         returns (address)
     {
         require(
@@ -78,7 +69,7 @@ contract RockPaperScissors {
         Game memory game;
         game.firstPlayer.playerAddress = msg.sender;
         game.firstPlayer.hashedChoice = keccak256(
-            abi.encodePacked(choices[_choiceId], _nonce)
+            abi.encodePacked(_choice, _nonce)
         );
         game.timestamp = block.timestamp;
 
@@ -91,9 +82,9 @@ contract RockPaperScissors {
 
     function submit(
         address _gameId,
-        uint256 _choiceId,
+        Choice _choice,
         uint256 _nonce
-    ) external validChoice(_choiceId) gameExists(_gameId) {
+    ) external validChoice(_choice) gameExists(_gameId) {
         require(games[_gameId].isFinished == false, "This game has finished !");
         require(
             msg.sender != games[_gameId].firstPlayer.playerAddress,
@@ -102,15 +93,15 @@ contract RockPaperScissors {
 
         games[_gameId].secondPlayer.playerAddress = msg.sender;
         games[_gameId].secondPlayer.hashedChoice = keccak256(
-            abi.encodePacked(choices[_choiceId], _nonce)
+            abi.encodePacked(_choice, _nonce)
         );
     }
 
     function reveal(
         address _gameId,
-        uint256 _choiceId,
+        Choice _choice,
         uint256 _nonce
-    ) external validChoice(_choiceId) gameExists(_gameId) returns (address) {
+    ) external validChoice(_choice) gameExists(_gameId) returns (address) {
         require(games[_gameId].isFinished == false, "This game has finished !");
 
         require(
@@ -126,18 +117,18 @@ contract RockPaperScissors {
 
         require(
             (games[_gameId].firstPlayer.playerAddress == msg.sender &&
-                bytes(games[_gameId].firstPlayer.choice).length == 0) ||
+                games[_gameId].firstPlayer.choice == Choice.UNDEFINED) ||
                 (games[_gameId].secondPlayer.playerAddress == msg.sender &&
-                    bytes(games[_gameId].secondPlayer.choice).length == 0),
+                    games[_gameId].secondPlayer.choice == Choice.UNDEFINED),
             "You've already revealed your choice !"
         );
 
         if (games[_gameId].firstPlayer.playerAddress == msg.sender) {
             if (
-                keccak256(abi.encodePacked(choices[_choiceId], _nonce)) ==
+                keccak256(abi.encodePacked(_choice, _nonce)) ==
                 games[_gameId].firstPlayer.hashedChoice
             ) {
-                games[_gameId].firstPlayer.choice = choices[_choiceId];
+                games[_gameId].firstPlayer.choice = _choice;
                 games[_gameId].firstPlayer.nonce = _nonce;
             } else
                 revert(
@@ -145,10 +136,10 @@ contract RockPaperScissors {
                 );
         } else {
             if (
-                keccak256(abi.encodePacked(choices[_choiceId], _nonce)) ==
+                keccak256(abi.encodePacked(_choice, _nonce)) ==
                 games[_gameId].secondPlayer.hashedChoice
             ) {
-                games[_gameId].secondPlayer.choice = choices[_choiceId];
+                games[_gameId].secondPlayer.choice = _choice;
                 games[_gameId].secondPlayer.nonce = _nonce;
             } else
                 revert(
@@ -157,8 +148,8 @@ contract RockPaperScissors {
         }
 
         if (
-            bytes(games[_gameId].firstPlayer.choice).length != 0 &&
-            bytes(games[_gameId].secondPlayer.choice).length != 0
+            games[_gameId].firstPlayer.choice != Choice.UNDEFINED &&
+            games[_gameId].secondPlayer.choice != Choice.UNDEFINED
         ) {
             games[_gameId].isFinished = true;
             findWinner(_gameId);
@@ -171,7 +162,6 @@ contract RockPaperScissors {
         gameExists(_gameId)
         returns (address)
     {
-        // R , P , S
         require(
             games[_gameId].isFinished == true,
             "The game hasn't finished yet !"
@@ -179,23 +169,11 @@ contract RockPaperScissors {
 
         if (games[_gameId].winner == address(0)) {
             if (
-                compareStringsbyBytes(
-                    games[_gameId].firstPlayer.choice,
-                    games[_gameId].secondPlayer.choice
-                )
+                games[_gameId].firstPlayer.choice ==
+                games[_gameId].secondPlayer.choice
             ) games[_gameId].isDraw = true;
-            else if (
-                compareStringsbyBytes(
-                    games[_gameId].firstPlayer.choice,
-                    choices[0]
-                )
-            ) {
-                if (
-                    compareStringsbyBytes(
-                        games[_gameId].secondPlayer.choice,
-                        choices[1]
-                    )
-                )
+            else if (games[_gameId].firstPlayer.choice == Choice.ROCK) {
+                if (games[_gameId].secondPlayer.choice == Choice.PAPER)
                     games[_gameId].winner = games[_gameId]
                         .secondPlayer
                         .playerAddress;
@@ -203,18 +181,8 @@ contract RockPaperScissors {
                     games[_gameId].winner = games[_gameId]
                         .firstPlayer
                         .playerAddress;
-            } else if (
-                compareStringsbyBytes(
-                    games[_gameId].firstPlayer.choice,
-                    choices[1]
-                )
-            ) {
-                if (
-                    compareStringsbyBytes(
-                        games[_gameId].secondPlayer.choice,
-                        choices[2]
-                    )
-                )
+            } else if (games[_gameId].firstPlayer.choice == Choice.PAPER) {
+                if (games[_gameId].secondPlayer.choice == Choice.SCISSORS)
                     games[_gameId].winner = games[_gameId]
                         .secondPlayer
                         .playerAddress;
@@ -222,18 +190,8 @@ contract RockPaperScissors {
                     games[_gameId].winner = games[_gameId]
                         .firstPlayer
                         .playerAddress;
-            } else if (
-                compareStringsbyBytes(
-                    games[_gameId].firstPlayer.choice,
-                    choices[2]
-                )
-            ) {
-                if (
-                    compareStringsbyBytes(
-                        games[_gameId].secondPlayer.choice,
-                        choices[0]
-                    )
-                )
+            } else if (games[_gameId].firstPlayer.choice == Choice.SCISSORS) {
+                if (games[_gameId].secondPlayer.choice == Choice.ROCK)
                     games[_gameId].winner = games[_gameId]
                         .secondPlayer
                         .playerAddress;
@@ -244,14 +202,5 @@ contract RockPaperScissors {
             }
         }
         return games[_gameId].winner;
-    }
-
-    function compareStringsbyBytes(string memory s1, string memory s2)
-        private
-        pure
-        returns (bool)
-    {
-        return
-            keccak256(abi.encodePacked(s1)) == keccak256(abi.encodePacked(s2));
     }
 }
