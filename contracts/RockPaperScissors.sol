@@ -11,6 +11,14 @@ contract RockPaperScissors {
         SCISSORS
     }
 
+    enum GameStatus {
+        UNDEFINED,
+        CREATED,
+        COMMITED,
+        REVEALING,
+        FINISHED
+    }
+
     struct Player {
         address playerAddress;
         Choice choice;
@@ -19,11 +27,11 @@ contract RockPaperScissors {
     }
 
     struct Game {
+        uint256 timestamp;
         Player firstPlayer;
         Player secondPlayer;
+        GameStatus status;
         address winner;
-        uint256 timestamp;
-        bool isFinished;
         bool isDraw;
     }
 
@@ -48,7 +56,10 @@ contract RockPaperScissors {
     }
 
     modifier gameExists(address _gameId) {
-        require(games[_gameId].timestamp > 0, "Invalid _gameId !");
+        require(
+            games[_gameId].status >= GameStatus.CREATED,
+            "Invalid _gameId !"
+        );
         _;
     }
 
@@ -62,7 +73,8 @@ contract RockPaperScissors {
         returns (address)
     {
         require(
-            games[msg.sender].timestamp == 0 || games[msg.sender].isFinished,
+            games[msg.sender].timestamp == 0 ||
+                games[msg.sender].status == GameStatus.FINISHED,
             "You can't create a new game until the old one finishes !"
         );
 
@@ -72,6 +84,7 @@ contract RockPaperScissors {
             abi.encodePacked(_choice, _nonce)
         );
         game.timestamp = block.timestamp;
+        game.status = GameStatus.CREATED;
 
         games[msg.sender] = game;
 
@@ -80,12 +93,15 @@ contract RockPaperScissors {
         return msg.sender;
     }
 
-    function submit(
+    function play(
         address _gameId,
         Choice _choice,
         uint256 _nonce
     ) external validChoice(_choice) gameExists(_gameId) {
-        require(games[_gameId].isFinished == false, "This game has finished !");
+        require(
+            games[_gameId].status != GameStatus.FINISHED,
+            "This game has finished !"
+        );
         require(
             msg.sender != games[_gameId].firstPlayer.playerAddress,
             "You've already played your role !"
@@ -95,6 +111,7 @@ contract RockPaperScissors {
         games[_gameId].secondPlayer.hashedChoice = keccak256(
             abi.encodePacked(_choice, _nonce)
         );
+        games[_gameId].status = GameStatus.COMMITED;
     }
 
     function reveal(
@@ -102,17 +119,16 @@ contract RockPaperScissors {
         Choice _choice,
         uint256 _nonce
     ) external validChoice(_choice) gameExists(_gameId) returns (address) {
-        require(games[_gameId].isFinished == false, "This game has finished !");
+        require(
+            games[_gameId].status == GameStatus.COMMITED ||
+                games[_gameId].status == GameStatus.REVEALING,
+            "This game has finished or hasn't been played yet!"
+        );
 
         require(
             games[_gameId].firstPlayer.playerAddress == msg.sender ||
                 games[_gameId].secondPlayer.playerAddress == msg.sender,
             "You don't have access into this game !"
-        );
-
-        require(
-            games[_gameId].secondPlayer.hashedChoice != 0,
-            "Can't reveal choices yet, all players need to submit choices !"
         );
 
         require(
@@ -123,35 +139,32 @@ contract RockPaperScissors {
             "You've already revealed your choice !"
         );
 
-        if (games[_gameId].firstPlayer.playerAddress == msg.sender) {
-            if (
-                keccak256(abi.encodePacked(_choice, _nonce)) ==
-                games[_gameId].firstPlayer.hashedChoice
-            ) {
-                games[_gameId].firstPlayer.choice = _choice;
-                games[_gameId].firstPlayer.nonce = _nonce;
-            } else
-                revert(
-                    "Invalid data, Please provide the right (choice,nonce) combination to reveal your choice !"
-                );
-        } else {
-            if (
-                keccak256(abi.encodePacked(_choice, _nonce)) ==
-                games[_gameId].secondPlayer.hashedChoice
-            ) {
-                games[_gameId].secondPlayer.choice = _choice;
-                games[_gameId].secondPlayer.nonce = _nonce;
-            } else
-                revert(
-                    "Invalid data, Please provide the right (choice,nonce) combination to reveal your choice !"
-                );
-        }
+        games[_gameId].status = GameStatus.REVEALING;
+
+        bytes32 hashedChoice = keccak256(abi.encodePacked(_choice, _nonce));
+
+        if (
+            (games[_gameId].firstPlayer.playerAddress == msg.sender) &&
+            (hashedChoice == games[_gameId].firstPlayer.hashedChoice)
+        ) {
+            games[_gameId].firstPlayer.choice = _choice;
+            games[_gameId].firstPlayer.nonce = _nonce;
+        } else if (
+            (games[_gameId].secondPlayer.playerAddress == msg.sender) &&
+            (hashedChoice == games[_gameId].secondPlayer.hashedChoice)
+        ) {
+            games[_gameId].secondPlayer.choice = _choice;
+            games[_gameId].secondPlayer.nonce = _nonce;
+        } else
+            revert(
+                "Invalid data, Please provide the right (choice,nonce) combination to reveal your choice !"
+            );
 
         if (
             games[_gameId].firstPlayer.choice != Choice.UNDEFINED &&
             games[_gameId].secondPlayer.choice != Choice.UNDEFINED
         ) {
-            games[_gameId].isFinished = true;
+            games[_gameId].status = GameStatus.FINISHED;
             findWinner(_gameId);
         }
         return games[_gameId].winner;
@@ -163,7 +176,7 @@ contract RockPaperScissors {
         returns (address)
     {
         require(
-            games[_gameId].isFinished == true,
+            games[_gameId].status == GameStatus.FINISHED,
             "The game hasn't finished yet !"
         );
 
