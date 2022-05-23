@@ -28,6 +28,8 @@ contract RockPaperScissors {
 
     struct Game {
         uint256 timestamp;
+        uint256 revealDeadline;
+        uint16 gameValidityInMinutes;
         Player firstPlayer;
         Player secondPlayer;
         GameStatus status;
@@ -67,15 +69,20 @@ contract RockPaperScissors {
         owner = msg.sender;
     }
 
-    function createGame(Choice _choice, uint256 _nonce)
-        external
-        validChoice(_choice)
-        returns (address)
-    {
+    function createGame(
+        Choice _choice,
+        uint256 _nonce,
+        uint16 _gameValidityInMinutes
+    ) external validChoice(_choice) returns (address) {
         require(
             games[msg.sender].timestamp == 0 ||
                 games[msg.sender].status == GameStatus.FINISHED,
             "You can't create a new game until the old one finishes !"
+        );
+
+        require(
+            _gameValidityInMinutes >= 20 && _gameValidityInMinutes <= 10080,
+            "The game must be valid for a minimum of 20 minutes and a maximum of 7 days !"
         );
 
         Game memory game;
@@ -84,6 +91,7 @@ contract RockPaperScissors {
             abi.encodePacked(_choice, _nonce)
         );
         game.timestamp = block.timestamp;
+        game.gameValidityInMinutes = _gameValidityInMinutes;
         game.status = GameStatus.CREATED;
 
         games[msg.sender] = game;
@@ -103,10 +111,14 @@ contract RockPaperScissors {
             "This game has finished !"
         );
         require(
-            msg.sender != games[_gameId].firstPlayer.playerAddress,
+            msg.sender != games[_gameId].firstPlayer.playerAddress &&
+                games[_gameId].status != GameStatus.COMMITED,
             "You've already played your role !"
         );
 
+        games[_gameId].revealDeadline =
+            block.timestamp +
+            (games[_gameId].gameValidityInMinutes * 60);
         games[_gameId].secondPlayer.playerAddress = msg.sender;
         games[_gameId].secondPlayer.hashedChoice = keccak256(
             abi.encodePacked(_choice, _nonce)
@@ -181,39 +193,51 @@ contract RockPaperScissors {
         );
 
         if (games[_gameId].winner == address(0)) {
-            if (
-                games[_gameId].firstPlayer.choice ==
-                games[_gameId].secondPlayer.choice
-            ) games[_gameId].isDraw = true;
-            else if (games[_gameId].firstPlayer.choice == Choice.ROCK) {
-                if (games[_gameId].secondPlayer.choice == Choice.PAPER)
-                    games[_gameId].winner = games[_gameId]
-                        .secondPlayer
-                        .playerAddress;
-                else
-                    games[_gameId].winner = games[_gameId]
-                        .firstPlayer
-                        .playerAddress;
-            } else if (games[_gameId].firstPlayer.choice == Choice.PAPER) {
-                if (games[_gameId].secondPlayer.choice == Choice.SCISSORS)
-                    games[_gameId].winner = games[_gameId]
-                        .secondPlayer
-                        .playerAddress;
-                else
-                    games[_gameId].winner = games[_gameId]
-                        .firstPlayer
-                        .playerAddress;
-            } else if (games[_gameId].firstPlayer.choice == Choice.SCISSORS) {
-                if (games[_gameId].secondPlayer.choice == Choice.ROCK)
-                    games[_gameId].winner = games[_gameId]
-                        .secondPlayer
-                        .playerAddress;
-                else
-                    games[_gameId].winner = games[_gameId]
-                        .firstPlayer
-                        .playerAddress;
-            }
+            checkDeadline(_gameId);
+
+            calculateWinner(_gameId);
         }
+
         return games[_gameId].winner;
+    }
+
+    function closeExpiredGames() public onlyOwner {}
+
+    function checkDeadline(address gameId) private {}
+
+    function calculateWinner(address _gameId) private {
+        if (
+            games[_gameId].firstPlayer.choice ==
+            games[_gameId].secondPlayer.choice
+        ) {
+            games[_gameId].isDraw = true;
+        } else if (games[_gameId].firstPlayer.choice == Choice.ROCK) {
+            if (games[_gameId].secondPlayer.choice == Choice.PAPER)
+                games[_gameId].winner = games[_gameId]
+                    .secondPlayer
+                    .playerAddress;
+            else
+                games[_gameId].winner = games[_gameId]
+                    .firstPlayer
+                    .playerAddress;
+        } else if (games[_gameId].firstPlayer.choice == Choice.PAPER) {
+            if (games[_gameId].secondPlayer.choice == Choice.SCISSORS)
+                games[_gameId].winner = games[_gameId]
+                    .secondPlayer
+                    .playerAddress;
+            else
+                games[_gameId].winner = games[_gameId]
+                    .firstPlayer
+                    .playerAddress;
+        } else if (games[_gameId].firstPlayer.choice == Choice.SCISSORS) {
+            if (games[_gameId].secondPlayer.choice == Choice.ROCK)
+                games[_gameId].winner = games[_gameId]
+                    .secondPlayer
+                    .playerAddress;
+            else
+                games[_gameId].winner = games[_gameId]
+                    .firstPlayer
+                    .playerAddress;
+        }
     }
 }
