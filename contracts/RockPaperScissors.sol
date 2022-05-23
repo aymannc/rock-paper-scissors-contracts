@@ -4,20 +4,40 @@ pragma solidity ^0.8.0;
 import "hardhat/console.sol";
 
 contract RockPaperScissors {
+    enum Choice {
+        UNDEFINED,
+        ROCK,
+        PAPER,
+        SCISSORS
+    }
+
+    enum GameStatus {
+        UNDEFINED,
+        CREATED,
+        COMMITED,
+        REVEALING,
+        FINISHED
+    }
+
+    struct Player {
+        address playerAddress;
+        Choice choice;
+        bytes32 hashedChoice;
+        uint256 nonce;
+    }
+
     struct Game {
-        address firstPlayer;
-        string firstPlayerChoice;
-        address secoundPlayer;
-        string secoundPlayerChoice;
-        bool isDraw;
+        uint256 timestamp;
+        uint256 revealDeadline;
+        uint16 gameValidityInMinutes;
+        Player firstPlayer;
+        Player secondPlayer;
+        GameStatus status;
         address winner;
-        bool exists;
-        bool isFinished;
+        bool isDraw;
     }
 
     mapping(address => Game) public games;
-
-    string[] public options;
 
     address owner;
 
@@ -29,132 +49,195 @@ contract RockPaperScissors {
         _;
     }
 
-    modifier validChoice(uint256 choiceId) {
-        require(choiceId < options.length, "Invalid choice Id !");
+    modifier validChoice(Choice _choice) {
+        require(
+            _choice >= Choice.ROCK && _choice <= Choice.SCISSORS,
+            "Invalid choice !"
+        );
         _;
     }
 
-    modifier gameExists(address gameId) {
-        require(games[gameId].exists, "Invalid gameId !");
+    modifier gameExists(address _gameId) {
+        require(
+            games[_gameId].status >= GameStatus.CREATED,
+            "Invalid _gameId !"
+        );
         _;
     }
 
     constructor() {
         owner = msg.sender;
-        options = ["R", "P", "S"];
     }
 
-    /**
-     * Read only function to retrieve the options of the game.
-     *
-     * The `view` modifier indicates that it doesn't modify the contract's
-     * state, which allows us to call it without executing a transaction.
-     *
-     * The `external` modifier makes a function *only* callable from outside
-     * the contract.
-     */
-    function getOptions() external view returns (string[] memory) {
-        return options;
-    }
+    function createGame(
+        Choice _choice,
+        uint256 _nonce,
+        uint16 _gameValidityInMinutes
+    ) external validChoice(_choice) returns (address) {
+        require(
+            games[msg.sender].timestamp == 0 ||
+                games[msg.sender].status == GameStatus.FINISHED,
+            "You can't create a new game until the old one finishes !"
+        );
 
-    function setOptions(string[] memory _options) external onlyOwner {
-        options = _options;
-    }
+        require(
+            _gameValidityInMinutes >= 20 && _gameValidityInMinutes <= 10080,
+            "The game must be valid for a minimum of 20 minutes and a maximum of 7 days !"
+        );
 
-    function createGame(uint256 choiceId)
-        external
-        validChoice(choiceId)
-        returns (address)
-    {
         Game memory game;
-        game.firstPlayer = msg.sender;
-        game.firstPlayerChoice = options[choiceId];
-        game.exists = true;
+        game.firstPlayer.playerAddress = msg.sender;
+        game.firstPlayer.hashedChoice = keccak256(
+            abi.encodePacked(_choice, _nonce)
+        );
+        game.timestamp = block.timestamp;
+        game.gameValidityInMinutes = _gameValidityInMinutes;
+        game.status = GameStatus.CREATED;
 
         games[msg.sender] = game;
+
         console.log(msg.sender);
 
         return msg.sender;
     }
 
-    function play(address gameId, uint256 choiceId)
-        external
-        validChoice(choiceId)
-        gameExists(gameId)
-        returns (Game memory)
-    {
-        require(games[gameId].isFinished == false, "This game has finished !");
+    function play(
+        address _gameId,
+        Choice _choice,
+        uint256 _nonce
+    ) external validChoice(_choice) gameExists(_gameId) {
         require(
-            msg.sender != games[gameId].firstPlayer,
+            games[_gameId].status != GameStatus.FINISHED,
+            "This game has finished !"
+        );
+        require(
+            msg.sender != games[_gameId].firstPlayer.playerAddress &&
+                games[_gameId].status != GameStatus.COMMITED,
             "You've already played your role !"
         );
 
-        games[gameId].secoundPlayer = msg.sender;
-        games[gameId].secoundPlayerChoice = options[choiceId];
-        games[gameId].isFinished = true;
-
-        return games[gameId];
+        games[_gameId].revealDeadline =
+            block.timestamp +
+            (games[_gameId].gameValidityInMinutes * 60);
+        games[_gameId].secondPlayer.playerAddress = msg.sender;
+        games[_gameId].secondPlayer.hashedChoice = keccak256(
+            abi.encodePacked(_choice, _nonce)
+        );
+        games[_gameId].status = GameStatus.COMMITED;
     }
 
-    function findWinner(address gameId)
-        external
-        gameExists(gameId)
-        returns (address)
-    {
-        // R , P , S
-
+    function reveal(
+        address _gameId,
+        Choice _choice,
+        uint256 _nonce
+    ) external validChoice(_choice) gameExists(_gameId) returns (address) {
         require(
-            games[gameId].isFinished == true,
-            "The second player hasn't played yet !"
+            games[_gameId].status == GameStatus.COMMITED ||
+                games[_gameId].status == GameStatus.REVEALING,
+            "This game has finished or hasn't been played yet!"
         );
 
-        if (
-            compareStringsbyBytes(
-                games[gameId].firstPlayerChoice,
-                games[gameId].secoundPlayerChoice
-            )
-        ) games[gameId].isDraw = true;
-        else if (
-            compareStringsbyBytes(games[gameId].firstPlayerChoice, options[0])
-        ) {
-            if (
-                compareStringsbyBytes(
-                    games[gameId].secoundPlayerChoice,
-                    options[1]
-                )
-            ) games[gameId].winner = games[gameId].secoundPlayer;
-            else games[gameId].winner = games[gameId].firstPlayer;
-        } else if (
-            compareStringsbyBytes(games[gameId].firstPlayerChoice, options[1])
-        ) {
-            if (
-                compareStringsbyBytes(
-                    games[gameId].secoundPlayerChoice,
-                    options[2]
-                )
-            ) games[gameId].winner = games[gameId].secoundPlayer;
-            else games[gameId].winner = games[gameId].firstPlayer;
-        } else if (
-            compareStringsbyBytes(games[gameId].firstPlayerChoice, options[2])
-        ) {
-            if (
-                compareStringsbyBytes(
-                    games[gameId].secoundPlayerChoice,
-                    options[0]
-                )
-            ) games[gameId].winner = games[gameId].secoundPlayer;
-            else games[gameId].winner = games[gameId].firstPlayer;
-        }
+        require(
+            games[_gameId].firstPlayer.playerAddress == msg.sender ||
+                games[_gameId].secondPlayer.playerAddress == msg.sender,
+            "You don't have access into this game !"
+        );
 
-        return games[gameId].winner;
+        require(
+            (games[_gameId].firstPlayer.playerAddress == msg.sender &&
+                games[_gameId].firstPlayer.choice == Choice.UNDEFINED) ||
+                (games[_gameId].secondPlayer.playerAddress == msg.sender &&
+                    games[_gameId].secondPlayer.choice == Choice.UNDEFINED),
+            "You've already revealed your choice !"
+        );
+
+        games[_gameId].status = GameStatus.REVEALING;
+
+        bytes32 hashedChoice = keccak256(abi.encodePacked(_choice, _nonce));
+
+        if (
+            (games[_gameId].firstPlayer.playerAddress == msg.sender) &&
+            (hashedChoice == games[_gameId].firstPlayer.hashedChoice)
+        ) {
+            games[_gameId].firstPlayer.choice = _choice;
+            games[_gameId].firstPlayer.nonce = _nonce;
+        } else if (
+            (games[_gameId].secondPlayer.playerAddress == msg.sender) &&
+            (hashedChoice == games[_gameId].secondPlayer.hashedChoice)
+        ) {
+            games[_gameId].secondPlayer.choice = _choice;
+            games[_gameId].secondPlayer.nonce = _nonce;
+        } else
+            revert(
+                "Invalid data, Please provide the right (choice,nonce) combination to reveal your choice !"
+            );
+
+        if (
+            games[_gameId].firstPlayer.choice != Choice.UNDEFINED &&
+            games[_gameId].secondPlayer.choice != Choice.UNDEFINED
+        ) {
+            games[_gameId].status = GameStatus.FINISHED;
+            findWinner(_gameId);
+        }
+        return games[_gameId].winner;
     }
 
-    function compareStringsbyBytes(string memory s1, string memory s2)
-        private
-        pure
-        returns (bool)
+    function findWinner(address _gameId)
+        public
+        gameExists(_gameId)
+        returns (address)
     {
-        return
-            keccak256(abi.encodePacked(s1)) == keccak256(abi.encodePacked(s2));
+        require(
+            games[_gameId].status == GameStatus.FINISHED,
+            "The game hasn't finished yet !"
+        );
+
+        if (games[_gameId].winner == address(0)) {
+            checkDeadline(_gameId);
+
+            calculateWinner(_gameId);
+        }
+
+        return games[_gameId].winner;
+    }
+
+    function closeExpiredGames() public onlyOwner {}
+
+    function checkDeadline(address gameId) private {}
+
+    function calculateWinner(address _gameId) private {
+        if (
+            games[_gameId].firstPlayer.choice ==
+            games[_gameId].secondPlayer.choice
+        ) {
+            games[_gameId].isDraw = true;
+        } else if (games[_gameId].firstPlayer.choice == Choice.ROCK) {
+            if (games[_gameId].secondPlayer.choice == Choice.PAPER)
+                games[_gameId].winner = games[_gameId]
+                    .secondPlayer
+                    .playerAddress;
+            else
+                games[_gameId].winner = games[_gameId]
+                    .firstPlayer
+                    .playerAddress;
+        } else if (games[_gameId].firstPlayer.choice == Choice.PAPER) {
+            if (games[_gameId].secondPlayer.choice == Choice.SCISSORS)
+                games[_gameId].winner = games[_gameId]
+                    .secondPlayer
+                    .playerAddress;
+            else
+                games[_gameId].winner = games[_gameId]
+                    .firstPlayer
+                    .playerAddress;
+        } else if (games[_gameId].firstPlayer.choice == Choice.SCISSORS) {
+            if (games[_gameId].secondPlayer.choice == Choice.ROCK)
+                games[_gameId].winner = games[_gameId]
+                    .secondPlayer
+                    .playerAddress;
+            else
+                games[_gameId].winner = games[_gameId]
+                    .firstPlayer
+                    .playerAddress;
+        }
     }
 }
